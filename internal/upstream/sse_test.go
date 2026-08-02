@@ -259,3 +259,60 @@ func TestMergeToolCallSOLOFunctionCall(t *testing.T) {
 		t.Fatalf("arguments=%q", args)
 	}
 }
+
+func TestMergeToolCallStripsSOLOFields(t *testing.T) {
+	toolCalls := map[int]map[string]any{}
+	var order []int
+	m := json.RawMessage(`[{"index":0,"id":"call_y","type":"function","function_call":{"name":"skill_view","arguments":"{\"name\":\"x\"}","namespace":"trae","partial_arguments":null}}]`)
+	mergeToolCallJSON(toolCalls, &order, m)
+	fn, _ := toolCalls[0]["function"].(map[string]any)
+	if _, has := fn["namespace"]; has {
+		t.Error("namespace should be stripped")
+	}
+	if _, has := fn["partial_arguments"]; has {
+		t.Error("partial_arguments should be stripped")
+	}
+	if fn["name"] != "skill_view" {
+		t.Errorf("name=%v", fn["name"])
+	}
+}
+
+func TestPrepareBodyAssistantToolCallsToFunctionCall(t *testing.T) {
+	src := `{"model":"glm-5.2","messages":[
+	  {"role":"user","content":"hi"},
+	  {"role":"assistant","content":null,"tool_calls":[{"id":"call_x","type":"function","function":{"name":"skill_view","arguments":"{\"name\":\"hermes-agent\"}"}}]},
+	  {"role":"tool","tool_call_id":"call_x","content":"skill content"}
+	],"tools":[{"type":"function","function":{"name":"skill_view"}}]}`
+	out := PrepareBody([]byte(src))
+	var obj map[string]any
+	_ = json.Unmarshal(out, &obj)
+	msgs := obj["messages"].([]any)
+	assistant := msgs[1].(map[string]any)
+	tcs := assistant["tool_calls"].([]any)
+	tc := tcs[0].(map[string]any)
+	if _, has := tc["function"]; has {
+		t.Error("function should be converted to function_call")
+	}
+	fc, ok := tc["function_call"].(map[string]any)
+	if !ok {
+		t.Fatalf("function_call missing: %#v", tc)
+	}
+	if fc["name"] != "skill_view" {
+		t.Errorf("function_call.name=%v", fc["name"])
+	}
+}
+
+func TestPrepareBodyToolCallWithoutNameDropped(t *testing.T) {
+	src := `{"model":"glm-5.2","messages":[
+	  {"role":"user","content":"hi"},
+	  {"role":"assistant","tool_calls":[{"id":"call_bad","type":"function","function":{"arguments":"{}"}}]}
+	]}`
+	out := PrepareBody([]byte(src))
+	var obj map[string]any
+	_ = json.Unmarshal(out, &obj)
+	msgs := obj["messages"].([]any)
+	assistant := msgs[1].(map[string]any)
+	if _, has := assistant["tool_calls"]; has {
+		t.Error("tool_call without name should be dropped")
+	}
+}

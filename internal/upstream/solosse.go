@@ -271,6 +271,9 @@ func mergeToolCallDelta(merged, delta map[string]any) {
 	if df == nil {
 		return
 	}
+	// 清理 SOLO 专属字段,只保留标准 OpenAI function 结构(name/arguments)
+	delete(df, "namespace")
+	delete(df, "partial_arguments")
 	mf, _ := merged["function"].(map[string]any)
 	if mf == nil {
 		mf = map[string]any{}
@@ -388,6 +391,11 @@ func streamOpts(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError)
 							if fc, ok := call["function_call"].(map[string]any); ok {
 								call["function"] = fc
 								delete(call, "function_call")
+							}
+							// 清理 SOLO 专属字段,只保留标准 OpenAI function 结构(name/arguments)
+							if fn, ok := call["function"].(map[string]any); ok {
+								delete(fn, "namespace")
+								delete(fn, "partial_arguments")
 							}
 						}
 						delta["tool_calls"] = tc

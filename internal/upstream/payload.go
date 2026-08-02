@@ -36,8 +36,41 @@ func PrepareBody(src []byte) []byte {
 				continue
 			}
 			content, present := m["content"]
-			if !present {
-				continue
+			role, _ := m["role"].(string)
+
+			// assistant 消息回传 tool_calls: OpenAI function → 上游 function_call
+			if role == "assistant" {
+				if tcs, ok := m["tool_calls"].([]any); ok {
+					kept := make([]any, 0, len(tcs))
+					for _, tci := range tcs {
+						tc, ok := tci.(map[string]any)
+						if !ok {
+							continue
+						}
+						// OpenAI: function{name, arguments} → 上游 SOLO: function_call{name, arguments}
+						if fn, ok := tc["function"].(map[string]any); ok {
+							tc["function_call"] = fn
+							delete(tc, "function")
+						}
+						// 上游要求 FunctionCall.Name 必填: 无 name 的 tool_call 剔除
+						if fc, ok := tc["function_call"].(map[string]any); ok {
+							name, _ := fc["name"].(string)
+							if strings.TrimSpace(name) == "" {
+								continue
+							}
+						}
+						kept = append(kept, tc)
+					}
+					if len(kept) == 0 {
+						delete(m, "tool_calls")
+					} else {
+						m["tool_calls"] = kept
+					}
+				}
+			}
+
+			if !present || content == nil {
+				continue // 无 content 的消息(如纯 tool_calls assistant 已转换完)保留字段但跳过 content 改写
 			}
 			switch c := content.(type) {
 			case string:
