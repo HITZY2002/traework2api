@@ -41,15 +41,16 @@ type accountResult struct {
 	UID      string `json:"uid"`
 	Nickname string `json:"nickname"`
 	Remain   *int64 `json:"remain"`
+	Limit    *int64 `json:"limit,omitempty"`
 	Packages int    `json:"packages,omitempty"`
 	OK       bool   `json:"ok"`
 	Error    string `json:"error,omitempty"`
 }
 
-func fetchEntUsage(af *authFile) (remain int64, packs int, err error) {
+func fetchEntUsage(af *authFile) (remain int64, limit int64, packs int, err error) {
 	req, err := http.NewRequest(http.MethodPost, upstream.UgHost+upstream.EpEntUsage, bytes.NewReader([]byte("{}")))
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
@@ -61,11 +62,11 @@ func fetchEntUsage(af *authFile) (remain int64, packs int, err error) {
 	client := &http.Client{Timeout: 20 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return 0, 0, fmt.Errorf("http %d", resp.StatusCode)
+		return 0, 0, 0, fmt.Errorf("http %d", resp.StatusCode)
 	}
 	var env struct {
 		IsCreditsBilling bool `json:"is_credits_billing"`
@@ -75,15 +76,25 @@ func fetchEntUsage(af *authFile) (remain int64, packs int, err error) {
 					CreditsLimit int64 `json:"credits_limit"`
 				} `json:"quota"`
 			} `json:"entitlement_base_info"`
+			// usage.credits_amount 是已用积分(实测),remain = limit - used
+			Usage struct {
+				CreditsAmount float64 `json:"credits_amount"`
+			} `json:"usage"`
 		} `json:"user_entitlement_pack_list"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	for _, p := range env.UserEntitlementPackList {
-		remain += p.EntitlementBaseInfo.Quota.CreditsLimit
+		l := p.EntitlementBaseInfo.Quota.CreditsLimit
+		if l <= 0 {
+			continue
+		}
+		used := int64(p.Usage.CreditsAmount)
+		limit += l
+		remain += l - used
 	}
-	return remain, len(env.UserEntitlementPackList), nil
+	return remain, limit, len(env.UserEntitlementPackList), nil
 }
 
 func main() {
@@ -125,11 +136,12 @@ func main() {
 			accounts = append(accounts, res)
 			continue
 		}
-		remain, packs, err := fetchEntUsage(&af)
+		remain, limit, packs, err := fetchEntUsage(&af)
 		if err != nil {
 			res.Error = err.Error()
 		} else {
 			res.Remain = &remain
+			res.Limit = &limit
 			res.Packages = packs
 			res.OK = true
 		}
@@ -138,11 +150,15 @@ func main() {
 	}
 
 	var totalRemain int64
+	var totalLimit int64
 	okCount := 0
 	for _, a := range accounts {
 		if a.OK && a.Remain != nil {
 			okCount++
 			totalRemain += *a.Remain
+			if a.Limit != nil {
+				totalLimit += *a.Limit
+			}
 		}
 	}
 	out := map[string]any{
@@ -150,6 +166,7 @@ func main() {
 		"ts":      time.Now().Unix(),
 		"total": map[string]any{
 			"remain":   totalRemain,
+			"limit":    totalLimit,
 			"accounts": len(accounts),
 			"ok":       okCount,
 			"failed":   len(accounts) - okCount,
