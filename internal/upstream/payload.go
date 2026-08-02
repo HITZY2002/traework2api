@@ -59,6 +59,7 @@ func PrepareBody(src []byte) []byte {
 	obj["model"] = model
 
 	normalizeToolChoice(obj)
+	normalizeTools(obj)
 	out, err := json.Marshal(obj)
 	if err != nil {
 		return src
@@ -117,4 +118,43 @@ func normalizeToolChoice(obj map[string]any) {
 	default:
 		delete(obj, "tool_choice")
 	}
+}
+
+// normalizeTools 把 OpenAI tools 转为 SOLO 上游格式。
+// 实测上游 Go struct: FunctionDefinition.tools[].function.parameters 是 string 类型
+// （OpenAI 标准是 object）→ 需把 parameters 对象序列化为 JSON 字符串。
+// 同时 tools 条目若不是 map 或缺 function，整体剔除（避免上游反序列化失败）。
+func normalizeTools(obj map[string]any) {
+	raw, present := obj["tools"]
+	if !present {
+		return
+	}
+	list, ok := raw.([]any)
+	if !ok || len(list) == 0 {
+		return
+	}
+	out := make([]any, 0, len(list))
+	for _, item := range list {
+		t, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		fn, ok := t["function"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if params, ok := fn["parameters"]; ok {
+			if paramsMap, isMap := params.(map[string]any); isMap {
+				if s, err := json.Marshal(paramsMap); err == nil {
+					fn["parameters"] = string(s)
+				}
+			}
+		}
+		out = append(out, t)
+	}
+	if len(out) == 0 {
+		delete(obj, "tools")
+		return
+	}
+	obj["tools"] = out
 }

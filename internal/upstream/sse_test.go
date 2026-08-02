@@ -40,7 +40,7 @@ func TestPrepareBodyKeepsArrayContent(t *testing.T) {
 }
 
 func TestPrepareBodyToolChoiceFunctionObject(t *testing.T) {
-	out := PrepareBody([]byte(`{"model":"glm-5.2","tool_choice":{"type":"function","function":{"name":"get_weather"}},"tools":[{"type":"function"}]}`))
+	out := PrepareBody([]byte(`{"model":"glm-5.2","tool_choice":{"type":"function","function":{"name":"get_weather"}},"tools":[{"type":"function","function":{"name":"get_weather"}}]}`))
 	var m map[string]any
 	json.Unmarshal(out, &m)
 	if m["tool_choice"] != "get_weather" {
@@ -193,5 +193,69 @@ func TestStreamGuaranteesDone(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "data: [DONE]") {
 		t.Errorf("missing [DONE]: %q", rec.Body.String())
+	}
+}
+
+func TestPrepareBodyToolsParametersStringified(t *testing.T) {
+	src := `{"model":"glm-5.2","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"get_weather","description":"weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}]}`
+	out := PrepareBody([]byte(src))
+	var obj map[string]any
+	if err := json.Unmarshal(out, &obj); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	tools, ok := obj["tools"].([]any)
+	if !ok || len(tools) == 0 {
+		t.Fatalf("tools missing: %#v", obj["tools"])
+	}
+	tool, _ := tools[0].(map[string]any)
+	fn, _ := tool["function"].(map[string]any)
+	params, ok := fn["parameters"].(string)
+	if !ok {
+		t.Fatalf("parameters should be string, got %T", fn["parameters"])
+	}
+	if !strings.Contains(params, `"city"`) {
+		t.Fatalf("parameters content missing: %s", params)
+	}
+}
+
+func TestPrepareBodyToolsInvalidEntriesDropped(t *testing.T) {
+	src := `{"model":"glm-5.2","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"ok","parameters":{"type":"object"}}},{"bad":1}]}`
+	out := PrepareBody([]byte(src))
+	var obj map[string]any
+	_ = json.Unmarshal(out, &obj)
+	tools, ok := obj["tools"].([]any)
+	if !ok {
+		t.Fatalf("tools should exist")
+	}
+	if len(tools) != 1 {
+		t.Fatalf("invalid entry should be dropped, got %d", len(tools))
+	}
+}
+
+func TestMergeToolCallSOLOFunctionCall(t *testing.T) {
+	// 模拟 SOLO 上游的 function_call 格式(流式两段: 先 name,再 arguments)
+	toolCalls := map[int]map[string]any{}
+	var order []int
+	m1 := json.RawMessage(`[{"index":0,"id":"call_x","type":"function","function_call":{"name":"get_weather","arguments":"{\"city\":\"北京\""}}]`)
+	m2 := json.RawMessage(`[{"index":0,"id":"","type":"function","function_call":{"name":"","arguments":"}"}}]`)
+	mergeToolCallJSON(toolCalls, &order, m1)
+	mergeToolCallJSON(toolCalls, &order, m2)
+	if len(order) != 1 || order[0] != 0 {
+		t.Fatalf("order=%v", order)
+	}
+	m := toolCalls[0]
+	if m["id"] != "call_x" || m["type"] != "function" {
+		t.Fatalf("id/type: %#v", m)
+	}
+	fn, ok := m["function"].(map[string]any)
+	if !ok {
+		t.Fatalf("function missing: %#v", m)
+	}
+	if fn["name"] != "get_weather" {
+		t.Fatalf("name=%v", fn["name"])
+	}
+	args, _ := fn["arguments"].(string)
+	if args != `{"city":"北京"}` {
+		t.Fatalf("arguments=%q", args)
 	}
 }

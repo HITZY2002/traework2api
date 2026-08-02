@@ -256,6 +256,7 @@ func mergeToolCallJSON(toolCalls map[int]map[string]any, toolOrder *[]int, raw j
 
 // mergeToolCallDelta 把流式 tool_call 片段合并到累计对象：
 // id/type/function.name 直覆盖，function.arguments 拼接。
+// 上游 SOLO 用 `function_call` 字段（实测），OpenAI 标准用 `function`；两者都兼容。
 func mergeToolCallDelta(merged, delta map[string]any) {
 	if v, ok := delta["id"].(string); ok && v != "" {
 		merged["id"] = v
@@ -264,6 +265,9 @@ func mergeToolCallDelta(merged, delta map[string]any) {
 		merged["type"] = v
 	}
 	df, _ := delta["function"].(map[string]any)
+	if df == nil {
+		df, _ = delta["function_call"].(map[string]any) // SOLO 专属字段名
+	}
 	if df == nil {
 		return
 	}
@@ -379,6 +383,13 @@ func streamOpts(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError)
 				if len(ev.ToolCalls) > 0 && string(ev.ToolCalls) != "null" {
 					var tc []map[string]any
 					if err := json.Unmarshal(ev.ToolCalls, &tc); err == nil {
+						// SOLO 上游 tool_call 条目用 `function_call` 字段 → 转成 OpenAI 的 `function`
+						for _, call := range tc {
+							if fc, ok := call["function_call"].(map[string]any); ok {
+								call["function"] = fc
+								delete(call, "function_call")
+							}
+						}
 						delta["tool_calls"] = tc
 					}
 				}
