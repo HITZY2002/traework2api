@@ -84,7 +84,7 @@ const soloSSEFixture = "id:1\nevent:metadata\ndata:{\"model\":\"\",\"session_id\
 	"event:done\ndata:{\"finish_reason\":\"stop\"}\n\n"
 
 func TestAggregateSOLO(t *testing.T) {
-	resp, err := Aggregate(strings.NewReader(soloSSEFixture))
+	resp, err := Aggregate(strings.NewReader(soloSSEFixture), "glm-5.2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestAggregateSOLO(t *testing.T) {
 func TestAggregateSOLOError(t *testing.T) {
 	raw := "event:error\ndata:{\"code\":4001,\"message\":\"We're sorry, the param is invalid.\",\"extra\":null}\n\n" +
 		"event:done\ndata:{\"finish_reason\":\"stop\"}\n\n"
-	_, err := Aggregate(strings.NewReader(raw))
+	_, err := Aggregate(strings.NewReader(raw), "glm-5.2")
 	if err == nil {
 		t.Fatal("want error from event:error")
 	}
@@ -137,7 +137,7 @@ func TestParseSOLOLine(t *testing.T) {
 func TestAggregateSOLOToolCalls(t *testing.T) {
 	raw := "event:output\ndata:{\"response\":\"\",\"reasoning_content\":\"\",\"tool_calls\":[{\"id\":\"call_a\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"{\\\"city\\\":\\\"北京\\\"}\"},\"index\":0}]}\n\n" +
 		"event:done\ndata:{\"finish_reason\":\"tool_calls\"}\n\n"
-	resp, err := Aggregate(strings.NewReader(raw))
+	resp, err := Aggregate(strings.NewReader(raw), "glm-5.2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestAggregateSOLOToolCalls(t *testing.T) {
 
 func TestStreamConvertsToOpenAIChunks(t *testing.T) {
 	rec := httptest.NewRecorder()
-	err := Stream(rec, strings.NewReader(soloSSEFixture))
+	err := Stream(rec, strings.NewReader(soloSSEFixture), "glm-5.2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestStreamConvertsToOpenAIChunks(t *testing.T) {
 func TestStreamGuaranteesDone(t *testing.T) {
 	rec := httptest.NewRecorder()
 	// 上游中断（只有 output，无 done）
-	err := Stream(rec, strings.NewReader("event:output\ndata:{\"response\":\"x\",\"reasoning_content\":\"\",\"tool_calls\":null}\n\n"))
+	err := Stream(rec, strings.NewReader("event:output\ndata:{\"response\":\"x\",\"reasoning_content\":\"\",\"tool_calls\":null}\n\n"), "glm-5.2")
 	if err != nil {
 		t.Fatal(err)
 	}

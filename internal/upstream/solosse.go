@@ -140,7 +140,7 @@ func scanLine(st *sseState, line string) *SOLOEvent {
 
 // Aggregate 读取完整 SOLO SSE，聚合 response + reasoning + tool_calls + usage，
 // 产出单个 OpenAI chat.completion（非流式）。
-func Aggregate(r io.Reader) (map[string]any, error) {
+func Aggregate(r io.Reader, model string) (map[string]any, error) {
 	br := bufio.NewReaderSize(r, 64*1024)
 	var (
 		id           string
@@ -207,7 +207,7 @@ func Aggregate(r io.Reader) (map[string]any, error) {
 		"id":      id,
 		"object":  "chat.completion",
 		"created": time.Now().Unix(),
-		"model":   "",
+		"model":   model,
 		"choices": []any{
 			map[string]any{
 				"index":         0,
@@ -304,18 +304,19 @@ func sortInts(a []int) {
 
 // Stream 流式转换：SOLO SSE → OpenAI SSE chunk，每 chunk flush，保证至少一个 [DONE]。
 // 调用方必须先设置过 status 200；本函数自设 SSE headers。
-func Stream(w http.ResponseWriter, r io.Reader) error {
-	return streamOpts(w, r, nil)
+// model 用于响应 chunk 的 model 字段（客户端要看到自己请求的模型名）。
+func Stream(w http.ResponseWriter, r io.Reader, model string) error {
+	return streamOpts(w, r, model, nil)
 }
 
 // StreamWithError 同 Stream，额外在遇到上游 event:error 时回调 onErr（非 nil），
 // 供调用方冷却账号/记录日志；错误信息同时注入 SSE 事件流。
-func StreamWithError(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError)) error {
-	return streamOpts(w, r, onErr)
+func StreamWithError(w http.ResponseWriter, r io.Reader, model string, onErr func(*SOLOStreamError)) error {
+	return streamOpts(w, r, model, onErr)
 }
 
 // streamOpts Stream 的可选参数版本。
-func streamOpts(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError)) error {
+func streamOpts(w http.ResponseWriter, r io.Reader, model string, onErr func(*SOLOStreamError)) error {
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream")
 	h.Set("Cache-Control", "no-cache")
@@ -333,7 +334,7 @@ func streamOpts(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError)
 			"id":      id,
 			"object":  "chat.completion.chunk",
 			"created": time.Now().Unix(),
-			"model":   "",
+			"model":   model,
 			"choices": []any{
 				map[string]any{
 					"index": 0,

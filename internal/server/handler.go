@@ -398,13 +398,13 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		if peek.Stream {
 			h.cfg.Pool.NoteSuccess(acct.UID)
 			// 流内业务错误（1005 plan/5xx 等）→ 冷却账号，错误信息注入 SSE。
-			_ = upstream.StreamWithError(w, rc, func(se *upstream.SOLOStreamError) {
+			_ = upstream.StreamWithError(w, rc, peek.Model, func(se *upstream.SOLOStreamError) {
 				h.handleStreamError(acct.UID, se)
 			})
 			rc.Close()
 			return
 		}
-		resp, err := upstream.Aggregate(rc)
+		resp, err := upstream.Aggregate(rc, peek.Model)
 		rc.Close() // 已完全消费，立即释放上游连接（防轮转 continue 泄漏 body）
 		if err != nil {
 			// 流内业务错误（如 1005 plan 权益不足）→ 冷却账号并轮转下一账号。
