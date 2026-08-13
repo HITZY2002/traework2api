@@ -18,16 +18,25 @@ import (
 
 // Config handler 依赖。
 type Config struct {
-	Pool         *pool.Pool
-	Upstream     *upstream.Client
-	APIKey       string        // 空 = 不鉴权
-	MaxRotate    int           // 单请求最多换号次数，默认 3
-	PlanCooldown time.Duration // 1005 冷却，默认 12h
-	SoftCooldown time.Duration // 429 冷却，默认 60s
-	ErrThreshold int           // 连续错误阈值，默认 3
-	ErrCooldown  time.Duration // 错误冷却，默认 10m
-	RefreshSkew  time.Duration // token 预刷新窗口，默认 24h
-	DefaultModel string        // 默认 glm-5.2
+	Pool           *pool.Pool
+	Upstream       *upstream.Client
+	Scheduler      refreshRunner // 可选：全员保活
+	APIKey         string        // 空 = 不鉴权
+	AuthDir        string        // 面板重载 / OAuth 落盘
+	CheckinHours   []int
+	KeepaliveHours []int
+	MaxRotate      int           // 单请求最多换号次数，默认 3
+	PlanCooldown   time.Duration // 1005 冷却，默认 12h
+	SoftCooldown   time.Duration // 429 冷却，默认 60s
+	ErrThreshold   int           // 连续错误阈值，默认 3
+	ErrCooldown    time.Duration // 错误冷却，默认 10m
+	RefreshSkew    time.Duration // token 预刷新窗口，默认 24h
+	DefaultModel   string        // 默认 glm-5.2
+}
+
+// refreshRunner 调度器保活接口（避免 server → scheduler 循环依赖）。
+type refreshRunner interface {
+	RunRefreshNow()
 }
 
 // maxBodyBytes 请求体大小上限（8MB），超过返回 413。
@@ -35,8 +44,9 @@ const maxBodyBytes = 8 << 20
 
 // Handler 主路由。
 type Handler struct {
-	cfg Config
-	mux *http.ServeMux
+	cfg   Config
+	mux   *http.ServeMux
+	oauth *oauthStore
 }
 
 // NewHandler 构建 handler。
@@ -62,11 +72,29 @@ func NewHandler(cfg Config) *Handler {
 	if cfg.DefaultModel == "" {
 		cfg.DefaultModel = upstream.DefaultConfigName
 	}
-	h := &Handler{cfg: cfg, mux: http.NewServeMux()}
+	h := &Handler{cfg: cfg, mux: http.NewServeMux(), oauth: newOAuthStore()}
+	// WebUI 控制台
+	h.mux.HandleFunc("GET /{$}", h.servePanel)
+	h.mux.HandleFunc("GET /admin", h.servePanel)
+	h.mux.HandleFunc("GET /panel", h.servePanel)
+	h.mux.HandleFunc("GET /panel/", h.servePanel)
+	// OpenAI 兼容 API
 	h.mux.HandleFunc("POST /v1/chat/completions", h.withAuth(h.chatCompletions))
 	h.mux.HandleFunc("GET /v1/models", h.withAuth(h.models))
 	h.mux.HandleFunc("GET /status", h.withAuth(h.status))
 	h.mux.HandleFunc("GET /healthz", h.healthz)
+	// Admin API（面板）
+	h.mux.HandleFunc("GET /admin/api/overview", h.withAuth(h.adminOverview))
+	h.mux.HandleFunc("POST /admin/api/credits", h.withAuth(h.adminCredits))
+	h.mux.HandleFunc("POST /admin/api/checkin", h.withAuth(h.adminCheckin))
+	h.mux.HandleFunc("POST /admin/api/keepalive", h.withAuth(h.adminKeepalive))
+	h.mux.HandleFunc("POST /admin/api/reload", h.withAuth(h.adminReload))
+	h.mux.HandleFunc("POST /admin/api/accounts/enable", h.withAuth(h.adminEnable))
+	h.mux.HandleFunc("POST /admin/api/accounts/disable", h.withAuth(h.adminDisable))
+	h.mux.HandleFunc("POST /admin/api/accounts/clear-cooldown", h.withAuth(h.adminClearCooldown))
+	h.mux.HandleFunc("POST /admin/api/oauth/start", h.withAuth(h.adminOAuthStart))
+	h.mux.HandleFunc("POST /admin/api/oauth/finish", h.withAuth(h.adminOAuthFinish))
+	h.mux.HandleFunc("POST /admin/api/oauth/poll", h.withAuth(h.adminOAuthPoll))
 	return h
 }
 

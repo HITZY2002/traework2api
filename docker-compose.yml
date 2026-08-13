@@ -7,7 +7,8 @@ services:
       - TZ=Asia/Shanghai
       - TW2A_API_KEY=${TW2A_API_KEY:?set TW2A_API_KEY in .env or shell}   # key 走 env，不落盘 git
     ports:
-      - "7864:7864"
+      - "7865:7864"
     volumes:
       - ./auths:/app/auths
       - ./data:/app/data
+      - ./config.json:/app/config.json:ro

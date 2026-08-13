@@ -183,6 +183,60 @@ func (p *Pool) Disable(uid, reason string) {
 	p.saveLocked()
 }
 
+// Enable 解除禁用并清冷却（面板手动恢复）。
+func (p *Pool) Enable(uid string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	e, ok := p.byUID[uid]
+	if !ok {
+		return false
+	}
+	e.disabled = false
+	e.until = time.Time{}
+	e.reason = ""
+	e.errCount = 0
+	p.saveLocked()
+	return true
+}
+
+// ClearCooldown 仅清除冷却，不影响 disabled。
+func (p *Pool) ClearCooldown(uid string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	e, ok := p.byUID[uid]
+	if !ok {
+		return false
+	}
+	e.until = time.Time{}
+	if !e.disabled {
+		e.reason = ""
+	}
+	e.errCount = 0
+	p.saveLocked()
+	return true
+}
+
+// Stats 汇总账号数量。
+func (p *Pool) Stats() (total, healthy, disabled, cooling int, credits int64) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	now := time.Now()
+	for _, e := range p.byUID {
+		total++
+		credits += e.credits
+		if e.disabled {
+			disabled++
+			continue
+		}
+		if !e.until.IsZero() && now.Before(e.until) {
+			cooling++
+			continue
+		}
+		healthy++
+	}
+	return
+}
+
 // ReenableIfCredits 签到后解冻：仅当 remain > 0 且账号处于冷却（非禁用）时恢复。
 func (p *Pool) ReenableIfCredits(uid string, remain int64) {
 	p.mu.Lock()
