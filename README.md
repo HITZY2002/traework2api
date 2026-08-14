@@ -97,6 +97,15 @@ auths/            （gitignored）trae-*.json 凭证
 data/             （gitignored）state.json 池状态
 ```
 
+## Fork 说明
+
+本项目 fork 自 [Sliverkiss/traework2api](https://github.com/Sliverkiss/traework2api)，与上游保持同步。二开新增内容：
+
+- **WebUI 控制台 + 管理 API**（OAuth / 签到 / 保活 / 重载 / 启用禁用）
+- **修复流式/非流式响应 `model` 字段恒为空串**（`fix(upstream)`）
+- **设计系统升级**：字体 / 配色 / 密度 / 无障碍
+- **浅色玻璃拟态 + 黏土风格主题**
+
 ## 脱敏说明
 
 - 任何真实 token/key 一律 `********` 或 env 引用，绝不落盘 git。
