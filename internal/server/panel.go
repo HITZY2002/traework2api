@@ -21,7 +21,7 @@ func (h *Handler) servePanel(w http.ResponseWriter, r *http.Request) {
 	html = strings.ReplaceAll(html, "__SERVICE_NAME__", "traework2api")
 	html = strings.ReplaceAll(html, "__SERVICE_TITLE__", "TraeWork2API")
 	html = strings.ReplaceAll(html, "__LOGO__", "TW")
-	html = strings.ReplaceAll(html, "__ACCENT__", "#60a5fa")
+	html = strings.ReplaceAll(html, "__ACCENT__", "#2563eb")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
